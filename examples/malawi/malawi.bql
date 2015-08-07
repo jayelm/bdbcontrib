@@ -1,0 +1,256 @@
+-- # Malnutrition in Malawi Tutorial
+
+-- ## Motivation
+-- Kwashiorkor, a form of severe acute malnutirtion, is believed to be the
+-- consequence of inadequate nutrient intake, environmental conditions,
+-- plus genetic factors. The Malawi Twins Dataset follows 317 Malawian twin 
+-- pairs over the first 3 years of life. The data collected for each child
+-- falls roughly three categories:
+--  * Qualtiative attributes, such as location, gender, zygosity, twin pair 
+--  phenotype, and RUTF treatment.
+--  * Phyiscal attributes, such as weight-for-height score, arm circumference,
+--  and number of days suffering from various illnesses.
+--  * Microbiome data, which measures the level of various bacteria in the
+--  child's gastrointestinal tract.
+-- 
+-- We will use BayesDB to perform both exploratory and inferential analysis of
+-- the dataset. In particular, we are interested in exploring how malnutrition 
+-- (as measured by the chid's physical attributes) varies with environmental
+-- factors, and detecting any potential dependencies of malnutrition with
+-- qualitative or microbiomic variables.
+
+-- ## Creating A Table
+-- The first thing to do is to load the data from `malawi.csv` to a new
+-- BayesDB table called `malawi`.
+
+.csv malawi malawi.csv
+
+-- ## Dealing With Missing Data
+-- The vast majority of modern datasets contain missing entries denoted in
+-- in various ways (i.e `none`, `NA`, `NaN`,). BayesDB can easily deal with
+-- missing  values using the `.nullify` command, in this example we
+-- we are informing BayesDB to ignore `NA`, `n/a` and `''` (empty string).
+-- After analysis, the `INFER` command can predict likely values.
+
+.nullify malawi NA
+.nullify malawi n/a
+.nullify malawi ''
+
+-- ## An Exploratory Pass
+-- A key advantage of BayesDB is the ability to visualize relationships between
+-- susbets of variables using simple SQL-like commands. The command of interest
+-- is `.show`, which takes in a table and plots all pairwise relationships. The
+-- plots are of the following form:
+--  * Along the diagonal: frequency histograms, where `NUMERICAL`
+-- columns are overlayed with a non-parametric kernel density estimate (kde) of 
+-- the distribution (condionted on any `--color-by` argument). 
+--  * `NUMERICAL-CATEGORICAL`: _violin plots_ which are similar to traditional 
+-- boxplots with an additional kde estimate of the conditional distribution of 
+-- the `NUMERICAL` variable given the `CATEGORICAL` variable.
+--  * `NUMERICAL-NUMERICAL`: scatter plot, overlayed with a least-squares
+-- linear regression line and R-Squared value.
+--  * `NUMERICAL-CATEGORICAL`: scatter plot, overlayed with a least-squares
+--  linear regression line and R-Squared value.
+--  * `CATEGORICAL-CATEGORICAL`: Heatmap, where the color of each cell indicates
+-- the relative frequency of the (x,y) pair in the dataset.
+
+-- In the first query, we will explore pairwise relationships between the
+-- `whz` (weight-for- height zscore), `muac` (arm circumference), `agemonths`
+-- and `gender` variables. We use the `--color-by site` flag to 
+-- visualize (using different colors) how the variation depends on the location
+-- in Malawi.
+
+.show 'SELECT whz, muac, agemonths, gender, healthcategory, site FROM malawi;'
+    --colorby site
+
+-- Some children in the study were treated with additional supplements (such as
+-- RUTF or Soy). Let us explore how the characteristics of children who 
+-- received supplements differ from those who received no supplement? Notice
+-- how simple we can partition the types of children using an `IF-ELSE` clause.
+
+.show 'SELECT muac, whz, zygosity, healthcategory,
+        CASE WHEN rutfx IS NOT NULL THEN "SUPPLEMENT"
+            ELSE "NO SUPPLEMENT"
+            END AS supplements 
+    FROM malawi;' --colorby supplements 
+
+-- ## Creating A Data Generator 
+-- To do inference on the dataset, we need to specify a _generator_, which is a
+-- probabilistic description of the generative process that models the data.
+-- The default generator type is `CrossCat`, which provides a general and very
+-- powerful non-parametric Bayesian method for analyzing heterogenous and high
+-- dimensional data. Advanced users can create custom metamodels, which is
+-- beyond the scope of this tutorial.
+
+-- We then specify the statistical type of each variable in the dataset. A
+-- statistical type is either `CATEGORICAL`, `NUMERICAL` or `CYCLIC`. BayesDB
+-- generally does a good job guessing the statistical types (using the 
+-- `GUESS(*)` keyword).
+
+CREATE DEFAULT GENERATOR malawi_cc FOR malawi
+    USING crosscat(
+        GUESS(*), sampleid IGNORE, site CATEGORICAL, familyid IGNORE, 
+        personid IGNORE, zygosity CATEGORICAL, twinpairphenotype CATEGORICAL, 
+        healthcategory CATEGORICAL, gender CATEGORICAL, agemonths NUMERICAL,
+        whz NUMERICAL, haz NUMERICAL, waz NUMERICAL, muac NUMERICAL, 
+        fever CATEGORICAL, cough CATEGORICAL, diarrhea CATEGORICAL, 
+        vomiting CATEGORICAL, rutfx CATEGORICAL, month CATEGORICAL, 
+        year CATEGORICAL, numberofhighqualitydeprelicatedh NUMERICAL, 
+        humansequencesremoved NUMERICAL, numberofv416srrnasequences NUMERICAL, 
+        v416srrnasequencingrunid3 NUMERICAL, acetobacteraceae_uncl NUMERICAL, 
+        acidaminococcaceae_uncl NUMERICAL, acidaminococcus NUMERICAL, 
+        akkermansia NUMERICAL, alistipes NUMERICAL, alkaliphilus NUMERICAL, 
+        anaerococcus NUMERICAL, atopobium NUMERICAL, bacteroides NUMERICAL, 
+        bifidobacterium NUMERICAL, blautia NUMERICAL, brachyspira NUMERICAL, 
+        butyrivibrio NUMERICAL, campylobacter NUMERICAL, 
+        catenibacterium NUMERICAL, chlamydiaceae_uncl NUMERICAL, 
+        citrobacter NUMERICAL,
+        clostridiales_family_xi_incertae_sedis_uncl NUMERICAL, 
+        clostridium NUMERICAL, collinsella NUMERICAL, coprobacillus NUMERICAL, 
+        coprococcus NUMERICAL, desulfobulbaceae_uncl NUMERICAL, 
+        desulfovibrio NUMERICAL, dorea NUMERICAL, enterobacter NUMERICAL, 
+        enterococcus NUMERICAL, escherichia NUMERICAL, eubacterium NUMERICAL, 
+        faecalibacterium NUMERICAL, frankia NUMERICAL, fusobacterium NUMERICAL, 
+        gardnerella NUMERICAL, haemophilus NUMERICAL, helicobacter NUMERICAL, 
+        klebsiella NUMERICAL, lactobacillus NUMERICAL, lactococcus NUMERICAL, 
+        leuconostoc NUMERICAL, megamonas NUMERICAL, megasphaera NUMERICAL, 
+        methanobrevibacter NUMERICAL, micrococcus NUMERICAL, 
+        mitsuokella NUMERICAL, mycobacterium NUMERICAL, neisseria NUMERICAL,
+        neisseriaceae_uncl NUMERICAL, odoribacter NUMERICAL,
+        olsenella NUMERICAL, parabacteroides NUMERICAL, peptoniphilus NUMERICAL, 
+        phascolarctobacterium NUMERICAL, prevotella NUMERICAL,
+        providencia NUMERICAL, pseudomonas NUMERICAL, roseburia NUMERICAL,
+        rothia NUMERICAL, ruminococcus NUMERICAL, shigella NUMERICAL,
+        slackia NUMERICAL, sphingobacteriaceae_uncl NUMERICAL,
+        staphylococcus NUMERICAL, streptococcus NUMERICAL,
+        subdoligranulum NUMERICAL, sutterella NUMERICAL, veillonella NUMERICAL,
+        victivallis NUMERICAL, unclassified NUMERICAL
+    );
+
+-- ## Performing Analysis
+-- The next step is analyze the dataset. We first initialize and ensemble of 64
+-- seperate `CrossCat` models. The number of models depends on the complexity
+-- of the dataset, computation resources, and desired level of accuracy. We
+-- then run `ANALYZE` which trains the models for 4 minutes.
+
+INITIALIZE 16 MODELS FOR malawi;
+ANALYZE malawi FOR 30 MINUTES WAIT;
+
+-- ## Finding Dependencies
+
+-- One of the most common statistical techniques for detecting dependence
+-- between variables is using _correlation coefficients_ that are easily
+-- computable. BayesDB has the ability to compute observed correlation
+-- coefficients and their associated pvalues (under the null hypothesis that
+-- the correlation coefficient is zero). The following measures are used:
+--  * `NUMERICAL-NUMERICAL`: Squared Pearson correlation coefficient; hypothesis
+-- testing using Student's t-test.
+--  * `NUMERICAL-CATEGORICAL`: One-way ANOVA R-squared; hypothesis testing using
+-- an F-test.
+--  * `CATEGORICAL-CATEGORICAL`: Cramer's Phi; hypothesis testing using a
+-- Chi2 test for independence.
+-- Let us compute all pairwise correlations, and store the result in a new table
+-- called `malawi_correlations`.
+
+CREATE TABLE malawi_correlations AS ESTIMATE PAIRWISE CORRELATION AS corr, 
+    CORRELATION PVALUE AS pval FROM malawi;
+
+-- While these correlation measures are typical in statistical research, they
+-- are insufficient for capturing complex dependencies in high dimensional
+-- datasets. Let us visualize the data in `malawi_correlations`
+-- where we reject the null at significance level 5%. The correlations are very 
+-- sparse and quite weak. Which ones make sense? Which are surprising?
+
+.heatmap 'SELECT name0, name1,
+        CASE WHEN pval < 0.05 THEN corr ELSE 0 END
+            AS signficiant_correlation
+    FROM malawi_correlations;'
+
+-- As an alternative to correlation we can query BayesDB for the `DEPENDENCE
+-- PROBABILITY`, which represents the degree of belief that there is some
+-- (possibly highly non-linear) dependence bteween two variables. The exact
+-- definition of `DEPENDENCE PROBABILITY` depends on the generator being used.
+-- `CrossCat`, the default generator, infers dependence through a probabilistic
+-- clustering algorithm.
+
+.heatmap ESTIMATE PAIRWISE DEPENDENCE PROBABILITY FROM malawi;
+
+-- Notice that `CrossCat` learns a much richer network of dependence than 
+-- standard correlation. Investigating further, let us find the top 15
+-- variables in the dataset which have the greatest evidence of dependence with
+-- `whz` and `muac`, which are indicators of possible malnutrition. Which 
+-- dependencies are not surprising? Which microbiomes are dependent with
+-- `whz`, `muac`, and `healthcategory` and how could this information be useful?
+-- (Remember we have an initial set of around 70 microbiomes;
+-- `DEPENDENCE PROBABILITY` is a form of dimensionality reduction).
+
+.bar 'ESTIMATE COLUMNS DEPENDENCE PROBABILITY WITH whz AS "P(dep with whz)" 
+    FROM malawi
+    ORDER BY "P(dep with whz)" DESC LIMIT 15;'
+
+.bar 'ESTIMATE COLUMNS DEPENDENCE PROBABILITY WITH muac AS "P(dep with muac)" 
+    FROM malawi
+    ORDER BY "P(dep with muac)" DESC LIMIT 15;'
+
+.bar 'ESTIMATE COLUMNS DEPENDENCE PROBABILITY WITH
+        healthcategory AS "P(dep with healthcategory)"
+    FROM malawi
+    ORDER BY "P(dep with healthcategory)" DESC LIMIT 15;'
+
+-- Kwashiorkor is a very difficult disease to diagnose, requring an analysis
+-- of physical appearance, knowledge about the child's environment and diet,
+-- blood and urine tests as well as measuring minerals and vitamins in the body.
+-- Given all the data collected about each child, we can ask BayesDB for the
+-- predictive probability that the child has Kwashiorkor using the
+-- `PREDICTIVE PROBABILITY` command.
+
+CREATE TEMP TABLE predictive_probability_of_health AS 
+    ESTIMATE healthcategory, whz, muac, vomiting+diarrhea+fever+cough AS sick_days,
+        PREDICTIVE PROBABILITY OF healthcategory AS prob_health
+    FROM malawi
+    WHERE healthcategory IS NOT NULL;
+
+-- What is the average predictive probability for Kwashiorkor in the dataset?
+
+.sql SELECT AVG(prob_health) from predictive_probability_of_health;
+
+-- How does this differ from the proportion of children who have the disease?
+
+.sql SELECT
+    (SELECT COUNT(healthcategory) FROM malawi WHERE healthcategory = 'Kwashiorkor')
+        AS Sick_Children,
+    (SELECT COUNT(healthcategory) FROM malawi WHERE healthcategory IS NOT NULL)
+        AS Total_Children;
+
+-- Which cases are we able to predict that a child has Kwashiorkor, given all
+-- the other variables for that child? Let us visualize the subpopulations of
+-- children who have predictible, unpredictable and no Kwashiorkor.
+
+.show 'SELECT healthcategory, whz, muac, sick_days,
+    CASE WHEN (prob_health < 0.5 AND healthcategory="Kwashiorkor")
+          THEN "unpredictable_Kwashiorkor"
+        WHEN (prob_health > 0.50 AND healthcategory="Kwashiorkor")
+          THEN "predictable_Kwashiorkor"
+        ELSE "Healthy" END AS "Kwashiorkor_predictability" 
+    FROM predictive_probability_of_health;' 
+    --no-contour --colorby "Kwashiorkor_predictability"
+
+
+ESTIMATE sampleid, vomiting, diarrhea, fever, cough, healthcategory, 
+        waz, haz, whz, muac,
+        PREDICTIVE PROBABILITY OF muac AS predictive_probability_of_mauc
+    FROM malawi
+    WHERE healthcategory IS NOT NULL AND predictive_probability_of_mauc < 0.10;
+
+
+-- Suppose we observe data about a new child. She is a female from Chamba, and
+-- we know her zygosity, sickness days, and one microbiome. Let us add her
+-- to the database, and ask BayesDB to `PREDICT` her `healthcategory`, with
+-- the associated degree of belief.
+
+.sql INSERT INTO malawi (site, gender, zygosity, diarrhea, cough, muac, 
+    akkermansia) VALUES ('Chamba', 'Female', 'Monozygotic', 2, 7, 10, 0.075)
+
+INFER EXPLICIT PREDICT healthcategory 
+    AS pred_health CONFIDENCE conf_health 
+    FROM malawi WHERE rowid = last_insert_rowid();
