@@ -152,8 +152,8 @@ ANALYZE malawi FOR 30 MINUTES WAIT;
 -- Let us compute all pairwise correlations, and store the result in a new table
 -- called `malawi_correlations`.
 
-CREATE TABLE malawi_correlations AS ESTIMATE PAIRWISE CORRELATION AS corr, 
-    CORRELATION PVALUE AS pval FROM malawi;
+CREATE TABLE malawi_correlations AS ESTIMATE CORRELATION AS corr,
+    CORRELATION PVALUE AS pval FROM PAIRWISE COLUMNS OF malawi;
 
 -- While these correlation measures are typical in statistical research, they
 -- are insufficient for capturing complex dependencies in high dimensional
@@ -173,7 +173,7 @@ CREATE TABLE malawi_correlations AS ESTIMATE PAIRWISE CORRELATION AS corr,
 -- `CrossCat`, the default generator, infers dependence through a probabilistic
 -- clustering algorithm.
 
-.heatmap ESTIMATE PAIRWISE DEPENDENCE PROBABILITY FROM malawi;
+.heatmap ESTIMATE DEPENDENCE PROBABILITY FROM PAIRWISE COLUMNS OF malawi;
 
 -- Notice that `CrossCat` learns a much richer network of dependence than 
 -- standard correlation. Investigating further, let us find the top 15
@@ -184,17 +184,17 @@ CREATE TABLE malawi_correlations AS ESTIMATE PAIRWISE CORRELATION AS corr,
 -- (Remember we have an initial set of around 70 microbiomes;
 -- `DEPENDENCE PROBABILITY` is a form of dimensionality reduction).
 
-.bar 'ESTIMATE COLUMNS DEPENDENCE PROBABILITY WITH whz AS "P(dep with whz)" 
-    FROM malawi
+.bar 'ESTIMATE DEPENDENCE PROBABILITY WITH whz AS "P(dep with whz)"
+    FROM COLUMNS OF malawi
     ORDER BY "P(dep with whz)" DESC LIMIT 15;'
 
-.bar 'ESTIMATE COLUMNS DEPENDENCE PROBABILITY WITH muac AS "P(dep with muac)" 
-    FROM malawi
+.bar 'ESTIMATE DEPENDENCE PROBABILITY WITH muac AS "P(dep with muac)"
+    FROM COLUMNS OF malawi
     ORDER BY "P(dep with muac)" DESC LIMIT 15;'
 
-.bar 'ESTIMATE COLUMNS DEPENDENCE PROBABILITY WITH
+.bar 'ESTIMATE DEPENDENCE PROBABILITY WITH
         healthcategory AS "P(dep with healthcategory)"
-    FROM malawi
+    FROM COLUMNS OF malawi
     ORDER BY "P(dep with healthcategory)" DESC LIMIT 15;'
 
 -- Kwashiorkor is a very difficult disease to diagnose, requring an analysis
