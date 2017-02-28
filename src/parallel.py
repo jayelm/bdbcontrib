@@ -80,10 +80,10 @@ from bayeslite import bayesdb_open, bql_quote_name
 from bayeslite.util import cursor_value
 
 
-def _query_into_queue(query_string, params, queue, bdb_file):
+def _estimate_into_bdb(query_string, params, table, bdb_file):
     """
     Estimate pairwise similarity of a certain subset of the bdb according to
-    query_string; place it in the multiprocessing Manager.Queue().
+    query_string; insert the results into the given similarity table when done.
 
     For two technical reasons, this function is defined as a toplevel class and
     independently creates a bdb handle:
@@ -97,15 +97,28 @@ def _query_into_queue(query_string, params, queue, bdb_file):
     ----------
     query_string : str
         Name of the query to execute, determined by estimate_similarity_mp.
-    queue : multiprocessing.Manager.Queue
-        Queue to place results into
+    queue : str
+        Table to insert results into. NOTE: use bql_quote_name BEFORE passing
+        the string, as this function doesn't clean the input!
     bdb_file : str
         File location of the BayesDB database. This function will
         independently open a new BayesDB handler.
     """
     bdb = bayesdb_open(pathname=bdb_file)
     res = bdb.execute(query_string, params)
-    queue.put(cursor_to_df(res))
+
+    # Convert to dataframe, grab its values, convert to list.
+    rows = map(list, cursor_to_df(res).values)
+    insert_sql = '''
+        INSERT INTO {} (rowid0, rowid1, value) VALUES (?, ?, ?)
+    '''.format(table)
+
+    # Avoid sqlite3 500-insert limit by grouping insert statements
+    # into one transaction.
+    with bdb.transaction():
+        for row in rows:
+            print row
+            bdb.sql_execute(insert_sql, row)
 
 
 def _chunks(l, n):
@@ -205,26 +218,7 @@ def estimate_pairwise_similarity(bdb_file, table, model, sim_table=None,
         )
     '''.format(sim_table_q))
 
-    # Define the helper which inserts data into table in batches
-    def insert_into_sim(df):
-        """
-        Use the main thread bdb handle to successively insert results of
-        ESTIMATEs into the table.
-        """
-        rows = map(list, df.values)
-        insert_sql = '''
-            INSERT INTO {} (rowid0, rowid1, value) VALUES (?, ?, ?)
-        '''.format(sim_table_q)
-        # Avoid sqlite3 500-insert limit by grouping insert statements
-        # into one transaction.
-        with bdb.transaction():
-            for row in rows:
-                bdb.sql_execute(insert_sql, row)
-
     pool = mp.Pool(processes=cores)
-
-    manager = mp.Manager()
-    queue = manager.Queue()
 
     # Construct the estimate query template.
     q_template = '''
@@ -233,17 +227,9 @@ def estimate_pairwise_similarity(bdb_file, table, model, sim_table=None,
 
     for so in zip(sizes, offsets):
         pool.apply_async(
-            _query_into_queue, args=(q_template, so, queue, bdb_file)
+            _estimate_into_bdb, args=(q_template, so, sim_table_q, bdb_file)
         )
 
     # Close pool and wait for processes to finish
-    # FIXME: This waits for all processes to finish before inserting
-    # into the table, which means that memory usage is potentially very
-    # high!
     pool.close()
     pool.join()
-
-    # Process returned results
-    while not queue.empty():
-        df = queue.get()
-        insert_into_sim(df)
